@@ -13,8 +13,11 @@ jobs:
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
+        with:
+          path: kernel
 
       - name: Ganti KernelSU Lama ke BakaSU Terbaru
+        working-directory: kernel
         run: |
           rm -rf KernelSU drivers/kernelsu
           sed -i '/kernelsu/d' drivers/Kconfig drivers/Makefile
@@ -23,7 +26,9 @@ jobs:
       - name: Build Kernel
         uses: dabao1955/kernel_build_action@main
         with:
-          kernel-dir: .
+          kernel-url: https://github.com
+          kernel-branch: master
+          kernel-dir: kernel
           config: LawRun_defconfig
           arch: arm64
           android-version: 11
