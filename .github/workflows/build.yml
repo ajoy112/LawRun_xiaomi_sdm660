@@ -23,7 +23,8 @@ jobs:
         run: |
           rm -rf KernelSU drivers/kernelsu
           sed -i '/kernelsu/d' drivers/Kconfig drivers/Makefile
-          curl -LSs "https://githubusercontent.com" | bash -s main
+          # Perbaiki URL di bawah ini sesuai dengan script instalasi BakaSU yang Anda gunakan
+          curl -LSs "https://raw.githubusercontent.com/BakaSU/BakaSU/main/kernelsetup.sh" | bash -s main
 
       - name: Compile Kernel
         run: |
@@ -43,7 +44,7 @@ jobs:
       - name: Package AnyKernel3
         run: |
           AK3_PATH="osm0sis/AnyKernel3.git"
-          git clone --depth=1 "https://github.com{AK3_PATH}" AnyKernel3
+          git clone --depth=1 "https://github.com/$AK3_PATH" AnyKernel3
           rm -rf AnyKernel3/.git AnyKernel3/modules AnyKernel3/patch AnyKernel3/ramdisk
           sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel3/anykernel.sh
           sed -i 's!block=/dev/block/platform/omap/omap_hsmmc.0/by-name/boot;!block=auto;!g' AnyKernel3/anykernel.sh
@@ -56,3 +57,4 @@ jobs:
         with:
           tag_name: build-${{ github.run_number }}
           files: LawRun-Lavender-BakaSU.zip
+          token: ${{ secrets.GITHUB_TOKEN }}
