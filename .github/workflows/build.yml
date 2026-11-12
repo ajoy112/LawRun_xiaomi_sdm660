@@ -21,12 +21,9 @@ jobs:
 
       - name: Ganti KernelSU Lama ke BakaSU Terbaru
         run: |
-          # Hapus KernelSU lama
           rm -rf KernelSU drivers/kernelsu
           sed -i '/kernelsu/d' drivers/Kconfig drivers/Makefile
-          
-          # ✅ URL BENAR untuk BakaSU
-          curl -LSs "https://raw.githubusercontent.com/BakaDevelopers/BakaSU/main/install.sh" | bash -s main
+          curl -LSs "https://githubusercontent.com" | bash -s main
 
       - name: Compile Kernel
         run: |
@@ -45,8 +42,8 @@ jobs:
 
       - name: Package AnyKernel3
         run: |
-          # ✅ URL BENAR untuk AnyKernel3
-          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git
+          AK3_PATH="osm0sis/AnyKernel3.git"
+          git clone --depth=1 "https://github.com{AK3_PATH}" AnyKernel3
           rm -rf AnyKernel3/.git AnyKernel3/modules AnyKernel3/patch AnyKernel3/ramdisk
           sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel3/anykernel.sh
           sed -i 's!block=/dev/block/platform/omap/omap_hsmmc.0/by-name/boot;!block=auto;!g' AnyKernel3/anykernel.sh
