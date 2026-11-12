@@ -1,3 +1,4 @@
+
 name: Build LawRun Lavender BakaSU Latest
 
 on:
@@ -10,28 +11,78 @@ jobs:
   build-kernel:
     name: Build Kernel
     runs-on: ubuntu-22.04
+
     steps:
-      - name: Checkout source
+      - name: Checkout Source
         uses: actions/checkout@v4
 
       - name: Install Dependencies & Toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc bison build-essential ccache curl flex git gnupg gperf liblz4-tool libncurses5-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python3 clang lld llvm gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
+          sudo apt-get install -y \
+            bc bison build-essential ccache curl flex git \
+            gnupg gperf libelf-dev liblz4-tool libncurses5-dev \
+            libssl-dev libxml2 libxml2-utils lzop pngcrush rsync \
+            squashfs-tools xsltproc zip zlib1g-dev python3 \
+            clang lld llvm gcc-aarch64-linux-gnu \
+            gcc-arm-linux-gnueabi device-tree-compiler
 
-      - name: Ganti KernelSU Lama ke BakaSU Terbaru (Nomount Support)
+      - name: Install BakaSU Latest
         run: |
-          rm -rf KernelSU drivers/kernelsu
-          sed -i '/kernelsu/d' drivers/Kconfig drivers/Makefile
-          # Tambahkan opsi nomount atau argumen sesuai kebutuhan skrip BakaSU
-          curl -LSs "https://raw.githubusercontent.com/BakaSU/BakaSU/main/kernelsetup.sh" | bash -s main nomount
+          set -e
+
+          echo "Removing old KernelSU integration..."
+
+          rm -rf KernelSU
+          rm -rf drivers/kernelsu
+
+          if [ -f drivers/Makefile ]; then
+            sed -i '/kernelsu/d' drivers/Makefile
+          fi
+
+          if [ -f drivers/Kconfig ]; then
+            sed -i '/kernelsu/d' drivers/Kconfig
+          fi
+
+          echo "Installing official BakaSU..."
+
+          curl -LSs \
+            "https://raw.githubusercontent.com/Baka-SU/BakaSU/main/kernel/setup.sh" \
+            | bash
+
+          echo "BakaSU installation completed!"
+
+          test -d KernelSU/kernel
+          test -L drivers/kernelsu
+
+      - name: Configure Kernel
+        run: |
+          set -e
+
+          export ARCH=arm64
+          export SUBARCH=arm64
+
+          make O=out LawRun_defconfig
+
+          echo "Enabling BakaSU..."
+
+          scripts/config --file out/.config -e KSU
+
+          make O=out olddefconfig
+
+          grep -q '^CONFIG_KSU=y' out/.config || {
+            echo "ERROR: CONFIG_KSU is not enabled!"
+            exit 1
+          }
 
       - name: Compile Kernel
         run: |
+          set -e
+
           export ARCH=arm64
           export SUBARCH=arm64
-          make O=out LawRun_defconfig
-          make -j$(nproc) O=out \
+
+          make -j"$(nproc)" O=out \
             CC=clang \
             AR=llvm-ar \
             NM=llvm-nm \
@@ -41,20 +92,59 @@ jobs:
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi-
 
+          echo "Checking kernel image..."
+
+          if [ -f out/arch/arm64/boot/Image.gz-dtb ]; then
+            echo "Kernel Image.gz-dtb found!"
+          elif [ -f out/arch/arm64/boot/Image.gz ]; then
+            echo "Kernel Image.gz found!"
+          elif [ -f out/arch/arm64/boot/Image ]; then
+            echo "Kernel Image found!"
+          else
+            echo "ERROR: Kernel image not found!"
+            exit 1
+          fi
+
       - name: Package AnyKernel3
         run: |
-          AK3_PATH="osm0sis/AnyKernel3.git"
-          git clone --depth=1 "https://github.com/$AK3_PATH" AnyKernel3
-          rm -rf AnyKernel3/.git AnyKernel3/modules AnyKernel3/patch AnyKernel3/ramdisk
-          sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel3/anykernel.sh
-          sed -i 's!block=/dev/block/platform/omap/omap_hsmmc.0/by-name/boot;!block=auto;!g' AnyKernel3/anykernel.sh
-          cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
+          set -e
+
+          AK3_PATH="https://github.com/osm0sis/AnyKernel3.git"
+
+          git clone --depth=1 "$AK3_PATH" AnyKernel3
+
+          rm -rf AnyKernel3/.git
+
+          # Copy compiled kernel
+          if [ -f out/arch/arm64/boot/Image.gz-dtb ]; then
+            cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
+          elif [ -f out/arch/arm64/boot/Image.gz ]; then
+            cp out/arch/arm64/boot/Image.gz AnyKernel3/
+          else
+            cp out/arch/arm64/boot/Image AnyKernel3/
+          fi
+
           cd AnyKernel3
-          zip -r9 ../LawRun-Lavender-BakaSU.zip *
+
+          zip -r9 "$GITHUB_WORKSPACE/LawRun-Lavender-BakaSU.zip" .
+
+          cd ..
+
+          test -s LawRun-Lavender-BakaSU.zip
+
+          echo "AnyKernel3 package completed!"
 
       - name: Upload Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
+          name: LawRun Lavender BakaSU Build ${{ github.run_number }}
+          body: |
+            LawRun Kernel for Xiaomi Redmi Note 7 (Lavender).
+
+            - BakaSU Latest
+            - Architecture: ARM64
+            - Build: GitHub Actions
           files: LawRun-Lavender-BakaSU.zip
-          token: ${{ secrets.GITHUB_TOKEN }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
