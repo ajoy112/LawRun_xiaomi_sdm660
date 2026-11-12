@@ -9,80 +9,117 @@ permissions:
 
 jobs:
   build-kernel:
-    name: Build Kernel
+    name: Build LawRun Kernel
     runs-on: ubuntu-22.04
 
     steps:
+      # 1. Checkout source
       - name: Checkout Source
         uses: actions/checkout@v4
 
-      - name: Install Dependencies & Toolchain
+      # 2. Install dependencies
+      - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            bc bison build-essential ccache curl flex git \
-            gnupg gperf libelf-dev liblz4-tool libncurses5-dev \
-            libssl-dev libxml2 libxml2-utils lzop pngcrush rsync \
-            squashfs-tools xsltproc zip zlib1g-dev python3 \
-            clang lld llvm gcc-aarch64-linux-gnu \
-            gcc-arm-linux-gnueabi device-tree-compiler
 
+          sudo apt-get install -y \
+            bc \
+            bison \
+            build-essential \
+            ccache \
+            curl \
+            flex \
+            git \
+            gnupg \
+            gperf \
+            libelf-dev \
+            liblz4-tool \
+            libncurses5-dev \
+            libssl-dev \
+            libxml2 \
+            libxml2-utils \
+            lzop \
+            pngcrush \
+            rsync \
+            squashfs-tools \
+            xsltproc \
+            zip \
+            zlib1g-dev \
+            python3 \
+            clang \
+            lld \
+            llvm \
+            gcc-aarch64-linux-gnu \
+            gcc-arm-linux-gnueabi \
+            device-tree-compiler
+
+      # 3. Install BakaSU
       - name: Install BakaSU Latest
         run: |
-          set -e
+          set -euo pipefail
 
-          echo "Removing old KernelSU integration..."
+          echo "Removing old KernelSU..."
 
           rm -rf KernelSU
           rm -rf drivers/kernelsu
 
-          if [ -f drivers/Makefile ]; then
-            sed -i '/kernelsu/d' drivers/Makefile
-          fi
+          sed -i '/kernelsu/d' drivers/Makefile
+          sed -i '/drivers\/kernelsu\/Kconfig/d' drivers/Kconfig
 
-          if [ -f drivers/Kconfig ]; then
-            sed -i '/kernelsu/d' drivers/Kconfig
-          fi
+          echo "Downloading official BakaSU..."
 
-          echo "Installing official BakaSU..."
-
-          curl -LSs \
+          curl -fLSs \
             "https://raw.githubusercontent.com/Baka-SU/BakaSU/main/kernel/setup.sh" \
             | bash
 
-          echo "BakaSU installation completed!"
+          echo "Checking BakaSU installation..."
 
           test -d KernelSU/kernel
           test -L drivers/kernelsu
 
+          echo "BakaSU installation successful!"
+
+      # 4. Configure kernel
       - name: Configure Kernel
         run: |
-          set -e
+          set -euo pipefail
 
           export ARCH=arm64
           export SUBARCH=arm64
+
+          echo "Loading LawRun defconfig..."
 
           make O=out LawRun_defconfig
 
           echo "Enabling BakaSU..."
 
-          scripts/config --file out/.config -e KSU
+          scripts/config --file out/.config \
+            -e KSU \
+            -e KSU_MANUAL_HOOK
 
           make O=out olddefconfig
 
-          grep -q '^CONFIG_KSU=y' out/.config || {
-            echo "ERROR: CONFIG_KSU is not enabled!"
-            exit 1
-          }
+          echo "Checking BakaSU configuration..."
 
+          grep -q '^CONFIG_KSU=y' out/.config
+
+          grep -q '^CONFIG_KSU_MANUAL_HOOK=y' out/.config
+
+          echo "BakaSU configuration enabled!"
+
+      # 5. Compile kernel with error logging
       - name: Compile Kernel
         run: |
-          set -e
+          set -uo pipefail
 
           export ARCH=arm64
           export SUBARCH=arm64
 
-          make -j"$(nproc)" O=out \
+          echo "=================================="
+          echo "STARTING LAWRUN KERNEL BUILD"
+          echo "=================================="
+
+          if ! make -j"$(nproc)" O=out \
             CC=clang \
             AR=llvm-ar \
             NM=llvm-nm \
@@ -90,61 +127,102 @@ jobs:
             OBJDUMP=llvm-objdump \
             STRIP=llvm-strip \
             CROSS_COMPILE=aarch64-linux-gnu- \
-            CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            Image.gz-dtb 2>&1 | tee build.log; then
 
-          echo "Checking kernel image..."
+            echo "=================================="
+            echo "KERNEL BUILD FAILED"
+            echo "=================================="
 
-          if [ -f out/arch/arm64/boot/Image.gz-dtb ]; then
-            echo "Kernel Image.gz-dtb found!"
-          elif [ -f out/arch/arm64/boot/Image.gz ]; then
-            echo "Kernel Image.gz found!"
-          elif [ -f out/arch/arm64/boot/Image ]; then
-            echo "Kernel Image found!"
-          else
-            echo "ERROR: Kernel image not found!"
+            echo "Searching for actual errors..."
+
+            grep -in -B 8 -A 12 -E \
+              'error:|fatal error:|undefined reference|No such file|No rule to make target|Killed|Error [0-9]' \
+              build.log | tail -n 160 || true
+
+            echo "=================================="
+            echo "LAST 100 LINES"
+            echo "=================================="
+
+            tail -n 100 build.log
+
             exit 1
           fi
 
+          echo "=================================="
+          echo "KERNEL BUILD SUCCESSFUL"
+          echo "=================================="
+
+          test -s out/arch/arm64/boot/Image.gz-dtb
+
+      # 6. Upload build logs
+      - name: Upload Build Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: LawRun-Build-Logs
+          path: build.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+      # 7. Package AnyKernel3
       - name: Package AnyKernel3
         run: |
-          set -e
+          set -euo pipefail
 
-          AK3_PATH="https://github.com/osm0sis/AnyKernel3.git"
+          echo "Downloading AnyKernel3..."
 
-          git clone --depth=1 "$AK3_PATH" AnyKernel3
+          git clone --depth=1 \
+            https://github.com/osm0sis/AnyKernel3.git \
+            AnyKernel3
+
+          echo "Removing Git metadata..."
 
           rm -rf AnyKernel3/.git
 
-          # Copy compiled kernel
-          if [ -f out/arch/arm64/boot/Image.gz-dtb ]; then
-            cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
-          elif [ -f out/arch/arm64/boot/Image.gz ]; then
-            cp out/arch/arm64/boot/Image.gz AnyKernel3/
-          else
-            cp out/arch/arm64/boot/Image AnyKernel3/
-          fi
+          echo "Preparing AnyKernel3..."
+
+          sed -i 's/do.devicecheck=1/do.devicecheck=0/g' \
+            AnyKernel3/anykernel.sh
+
+          sed -i \
+            's!block=/dev/block/platform/omap/omap_hsmmc.0/by-name/boot;!block=auto;!g' \
+            AnyKernel3/anykernel.sh
+
+          echo "Copying kernel image..."
+
+          cp out/arch/arm64/boot/Image.gz-dtb \
+            AnyKernel3/Image.gz-dtb
+
+          echo "Creating flashable ZIP..."
 
           cd AnyKernel3
 
-          zip -r9 "$GITHUB_WORKSPACE/LawRun-Lavender-BakaSU.zip" .
+          zip -r9 \
+            "$GITHUB_WORKSPACE/LawRun-Lavender-BakaSU.zip" .
 
-          cd ..
+          cd "$GITHUB_WORKSPACE"
 
           test -s LawRun-Lavender-BakaSU.zip
 
-          echo "AnyKernel3 package completed!"
+          echo "AnyKernel3 package successful!"
 
+      # 8. Upload GitHub Release
       - name: Upload Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
-          name: LawRun Lavender BakaSU Build ${{ github.run_number }}
+          name: LawRun Lavender BakaSU Latest ${{ github.run_number }}
           body: |
             LawRun Kernel for Xiaomi Redmi Note 7 (Lavender).
 
+            Features:
             - BakaSU Latest
-            - Architecture: ARM64
-            - Build: GitHub Actions
+            - ARM64 Architecture
+            - Clang Compiler
+            - AnyKernel3 Installer
+
+            Built with GitHub Actions.
           files: LawRun-Lavender-BakaSU.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
