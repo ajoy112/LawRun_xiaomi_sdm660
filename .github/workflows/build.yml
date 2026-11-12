@@ -1,4 +1,4 @@
-name: Build LawRun Lavender BakaSU Latest
+name: Build LawRun Lavender FinaSU Latest
 
 on:
   workflow_dispatch:
@@ -19,13 +19,26 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential ccache curl flex git gnupg gperf liblz4-tool libncurses5-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python3 clang lld llvm gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
 
-      - name: Ganti KernelSU Lama ke BakaSU Terbaru
+      - name: Hapus KernelSU/BakaSU Lama & Pasang FinaSU
         run: |
+          # Bersihkan sisa KernelSU/BakaSU lama
           rm -rf KernelSU drivers/kernelsu
           sed -i '/kernelsu/d' drivers/Kconfig drivers/Makefile
-          curl -LSs "https://githubusercontent.com" | bash -s main
+          
+          # Pasang FinaSU — ganti URL sesuai repo resmi FinaSU
+          curl -LSs "https://raw.githubusercontent.com/FinaSU/FinaSU/main/install.sh" | bash -s main
 
-      - name: Compile Kernel
+      - name: Aktifkan Dukungan Module & Nomount
+        run: |
+          cd $GITHUB_WORKSPACE
+          # Aktifkan fitur module FinaSU
+          sed -i 's/# CONFIG_KSU_MODULES is not set/CONFIG_KSU_MODULES=y/g' arch/arm64/configs/LawRun_defconfig
+          # Aktifkan dukungan nomount
+          sed -i 's/# CONFIG_KSU_NOMOUNT is not set/CONFIG_KSU_NOMOUNT=y/g' arch/arm64/configs/LawRun_defconfig
+          echo "CONFIG_KSU_MODULES=y" >> arch/arm64/configs/LawRun_defconfig
+          echo "CONFIG_KSU_NOMOUNT=y" >> arch/arm64/configs/LawRun_defconfig
+
+      - name: Generate Defconfig & Compile Kernel
         run: |
           export ARCH=arm64
           export SUBARCH=arm64
@@ -42,16 +55,23 @@ jobs:
 
       - name: Package AnyKernel3
         run: |
-          git clone --depth=1 https://github.com
+          git clone --depth=1 https://github.com/osm0sis/AnyKernel3.git
           rm -rf AnyKernel3/.git AnyKernel3/modules AnyKernel3/patch AnyKernel3/ramdisk
+          
+          # Sesuaikan skrip AnyKernel3
           sed -i 's/do.devicecheck=1/do.devicecheck=0/g' AnyKernel3/anykernel.sh
           sed -i 's!block=/dev/block/platform/omap/omap_hsmmc.0/by-name/boot;!block=auto;!g' AnyKernel3/anykernel.sh
+          
+          # Tambahkan flag nomount untuk FinaSU di anykernel.sh
+          sed -i '/do.devicecheck=0/a \
+do.nomount=1' AnyKernel3/anykernel.sh
+          
           cp out/arch/arm64/boot/Image.gz-dtb AnyKernel3/
           cd AnyKernel3
-          zip -r9 ../LawRun-Lavender-BakaSU.zip *
+          zip -r9 ../LawRun-Lavender-FinaSU.zip *
 
       - name: Upload Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
-          files: LawRun-Lavender-BakaSU.zip
+          files: LawRun-Lavender-FinaSU.zip
