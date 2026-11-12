@@ -1,0 +1,36 @@
+name: Build LawRun Lavender BakaSU Latest
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-kernel:
+    name: Build Kernel
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Ganti KernelSU Lama ke BakaSU Terbaru
+        run: |
+          rm -rf KernelSU drivers/kernelsu
+          sed -i '/kernelsu/d' drivers/Kconfig drivers/Makefile
+          curl -LSs "https://githubusercontent.com" | bash -s main
+
+      - name: Build Kernel
+        uses: dabao1955/kernel_build_action@main
+        with:
+          kernel-dir: .
+          config: LawRun_defconfig
+          arch: arm64
+          android-version: 11
+          ksu: false
+          aosp-clang: true
+          aosp-clang-version: r416183b
+          aosp-gcc: true
+          anykernel3: true
+          release: true
+          access-token: ${{ secrets.GITHUB_TOKEN }}
